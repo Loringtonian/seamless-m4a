@@ -133,7 +133,7 @@ def log_experiment_results(
     python_version: str,
 ) -> None:
     """Append a markdown table row with experiment metadata."""
-    log_path = Path("experiment_log.md")
+    log_path = args.experiment_log
     if not log_path.exists():
         header = (
             "# Experiment Log\n\n"
@@ -278,19 +278,18 @@ def main() -> None:
     pred_lines = [l.strip() for l in combined_text.splitlines() if l.strip()]
     ref_spanish = set(identify_spanish_lines(ref_lines))
     pred_spanish = set(identify_spanish_lines(pred_lines))
-    accuracy = 0.0
     if ref_spanish:
-        multilingual_accuracy = len(ref_spanish & pred_spanish) / len(ref_spanish)
+        spanish_accuracy = len(ref_spanish & pred_spanish) / len(ref_spanish)
     else:
-        multilingual_accuracy = 1.0
+        spanish_accuracy = 1.0
     logging.info(
         "Spanish line detection accuracy: %.2f%%",
-        multilingual_accuracy * 100,
+        spanish_accuracy * 100,
     )
 
     overall = compute_transcript_score(
         wer=error_rate,
-        multilingual_accuracy=multilingual_accuracy,
+        multilingual_accuracy=spanish_accuracy,
         speaker_f1=None,
     )
     logging.info("Overall transcript score: %.1f/1000", overall)
@@ -302,7 +301,7 @@ def main() -> None:
     if not log_path.exists():
         log_path.write_text("# Experiment Log\n\n" + header + separator, encoding="utf-8")
 
-    spanish_acc = accuracy * 100 if ref_spanish else 0.0
+    spanish_acc = spanish_accuracy * 100 if ref_spanish else 0.0
     with log_path.open("a", encoding="utf-8") as f:
         f.write(f"| {args.duration} | {args.device} | {error_rate*100:.2f}% | {spanish_acc:.2f}% |\n")
 
