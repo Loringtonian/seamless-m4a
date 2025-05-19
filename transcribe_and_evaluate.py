@@ -39,6 +39,11 @@ except ImportError:  # pragma: no cover
 from transformers import AutoProcessor, logging as hf_logging
 from jiwer import wer
 from jiwer import Compose, RemovePunctuation, ToLowerCase, RemoveMultipleSpaces, Strip
+import logging
+
+import re
+
+from language_utils import identify_spanish_lines
 
 # Suppress HF generation warnings
 hf_logging.set_verbosity_error()
@@ -101,6 +106,12 @@ def transcribe_with_seamless(audio_path: Path, device: str = "cpu") -> str:
     return transcription.strip()
 
 
+def split_sentences(text: str) -> List[str]:
+    """Very naive sentence splitter based on punctuation."""
+    segments = re.split(r"(?<=[.!?])\s+", text.strip())
+    return [s.strip() for s in segments if s.strip()]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Transcribe two speaker tracks with SeamlessM4T and evaluate WER.")
     parser.add_argument("--student", type=Path, required=True, help="Path to Student Audio .m4a file")
@@ -109,6 +120,8 @@ def main() -> None:
     parser.add_argument("--duration", type=int, default=80, help="Max seconds of audio to process (default: 80)")
     parser.add_argument("--device", type=str, default="cpu", help="Device for model inference: 'cpu' or 'cuda'")
     args = parser.parse_args()
+
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(message)s")
 
     # Verify ffmpeg exists
     if subprocess.call(["which", "ffmpeg"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) != 0:
@@ -122,20 +135,25 @@ def main() -> None:
         convert_to_wav(args.teacher, teacher_wav, start_sec=0, duration_sec=args.duration)
 
         # Transcribe
-        print("Transcribing Student track …")
+        logging.info("Transcribing Student track …")
         student_text = transcribe_with_seamless(student_wav, device=args.device)
-        print("Student transcript:\n", student_text, "\n", sep="")
+        logging.info("Student transcript:\n%s\n", student_text)
 
-        print("Transcribing Teacher track …")
+        logging.info("Transcribing Teacher track …")
         teacher_text = transcribe_with_seamless(teacher_wav, device=args.device)
-        print("Teacher transcript:\n", teacher_text, "\n", sep="")
+        logging.info("Teacher transcript:\n%s\n", teacher_text)
 
     # Save transcripts
     Path("student_transcript.txt").write_text(student_text, encoding="utf-8")
     Path("teacher_transcript.txt").write_text(teacher_text, encoding="utf-8")
 
-    # Combine (naïve order: Student then Teacher)
-    combined_text = f"STUDENT: {student_text}\nTEACHER: {teacher_text}"
+    # Combine (naïve order: Student then Teacher). We also split each transcript
+    # into simple sentence-like units so that language identification can be
+    # applied per line instead of on the entire block.
+    student_lines = split_sentences(student_text)
+    teacher_lines = split_sentences(teacher_text)
+    combined_lines = [f"STUDENT: {l}" for l in student_lines] + [f"TEACHER: {l}" for l in teacher_lines]
+    combined_text = "\n".join(combined_lines)
     Path("combined_transcript.txt").write_text(combined_text, encoding="utf-8")
 
     # Reference text (only first duration seconds available)
@@ -150,7 +168,20 @@ def main() -> None:
         truth_transform=transformation,
         hypothesis_transform=transformation,
     )
-    print(f"\nWord Error Rate (WER) vs reference (first {args.duration} s): {error_rate * 100:.2f}%")
+    logging.info(
+        "Word Error Rate (WER) vs reference (first %s s): %.2f%%",
+        args.duration,
+        error_rate * 100,
+    )
+
+    # Evaluate Spanish line detection
+    ref_lines = [l.strip() for l in reference_text.splitlines() if l.strip()]
+    pred_lines = [l.strip() for l in combined_text.splitlines() if l.strip()]
+    ref_spanish = set(identify_spanish_lines(ref_lines))
+    pred_spanish = set(identify_spanish_lines(pred_lines))
+    if ref_spanish:
+        accuracy = len(ref_spanish & pred_spanish) / len(ref_spanish)
+        logging.info("Spanish line detection accuracy: %.2f%%", accuracy * 100)
 
 
 if __name__ == "__main__":
