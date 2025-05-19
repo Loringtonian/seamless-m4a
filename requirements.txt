@@ -6,3 +6,4 @@ sentencepiece>=0.1.99
 soundfile>=0.12.1
 ffmpeg-python>=0.2.0
 jiwer>=3.0.1 
+pytest>=7.4 # offline stub included
