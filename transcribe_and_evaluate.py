@@ -163,6 +163,18 @@ def main() -> None:
     parser.add_argument("--reference", type=Path, required=True, help="Path to corrected transcript text file")
     parser.add_argument("--duration", type=int, default=80, help="Max seconds of audio to process (default: 80)")
     parser.add_argument("--device", type=str, default="cpu", help="Device for model inference: 'cpu' or 'cuda'")
+    parser.add_argument(
+        "--experiment-log",
+        type=Path,
+        default=Path("experiment_log.md"),
+        help="Path to markdown log where results will be appended",
+    )
+    # Variables below can be tuned in an experiment grid to improve performance.
+    # For example:
+    #   * --duration: clip length to transcribe
+    #   * --device: 'cpu' or 'cuda'
+    #   * start time or ASR model variant (requires code changes)
+    # Add new parameters here to automatically log their impact.
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(message)s")
@@ -265,9 +277,21 @@ def main() -> None:
     pred_lines = [l.strip() for l in combined_text.splitlines() if l.strip()]
     ref_spanish = set(identify_spanish_lines(ref_lines))
     pred_spanish = set(identify_spanish_lines(pred_lines))
+    accuracy = 0.0
     if ref_spanish:
         accuracy = len(ref_spanish & pred_spanish) / len(ref_spanish)
         logging.info("Spanish line detection accuracy: %.2f%%", accuracy * 100)
+
+    # Append results to experiment log for later comparison
+    log_path = args.experiment_log
+    header = "| duration | device | WER | SpanishAcc |\n"
+    separator = "|---|---|---|---|\n"
+    if not log_path.exists():
+        log_path.write_text("# Experiment Log\n\n" + header + separator, encoding="utf-8")
+
+    spanish_acc = accuracy * 100 if ref_spanish else 0.0
+    with log_path.open("a", encoding="utf-8") as f:
+        f.write(f"| {args.duration} | {args.device} | {error_rate*100:.2f}% | {spanish_acc:.2f}% |\n")
 
 
 if __name__ == "__main__":
