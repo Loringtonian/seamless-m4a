@@ -46,6 +46,7 @@ from datetime import datetime
 import re
 
 from language_utils import identify_spanish_lines
+from grading import compute_transcript_score
 
 # Suppress HF generation warnings
 hf_logging.set_verbosity_error()
@@ -279,8 +280,20 @@ def main() -> None:
     pred_spanish = set(identify_spanish_lines(pred_lines))
     accuracy = 0.0
     if ref_spanish:
-        accuracy = len(ref_spanish & pred_spanish) / len(ref_spanish)
-        logging.info("Spanish line detection accuracy: %.2f%%", accuracy * 100)
+        multilingual_accuracy = len(ref_spanish & pred_spanish) / len(ref_spanish)
+    else:
+        multilingual_accuracy = 1.0
+    logging.info(
+        "Spanish line detection accuracy: %.2f%%",
+        multilingual_accuracy * 100,
+    )
+
+    overall = compute_transcript_score(
+        wer=error_rate,
+        multilingual_accuracy=multilingual_accuracy,
+        speaker_f1=None,
+    )
+    logging.info("Overall transcript score: %.1f/1000", overall)
 
     # Append results to experiment log for later comparison
     log_path = args.experiment_log
