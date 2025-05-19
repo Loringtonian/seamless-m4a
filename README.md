@@ -45,6 +45,8 @@ The script will:
    * `teacher_transcript.txt`  
    * `combined_transcript.txt` (naïve concatenation with speaker tags)
 3. Print the **WER** versus the provided reference text (first *n* seconds only).
+4. Append a summary to `experiment_log.md` with the CLI options, runtime,
+   word counts, current Git hash and WER.
 
 > **Note**: For now the merging of speaker tracks is a simple concatenation (student first, then teacher).  In future iterations we'll use timestamps to interleave utterances chronologically.
 

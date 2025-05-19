@@ -21,11 +21,11 @@ accurate interleaving based on segment timestamps will be added in future iterat
 from __future__ import annotations
 
 import argparse
-import os
 import subprocess
 import tempfile
 from pathlib import Path
 from typing import List
+import sys
 
 import torch
 import torchaudio
@@ -40,6 +40,8 @@ from transformers import AutoProcessor, logging as hf_logging
 from jiwer import wer
 from jiwer import Compose, RemovePunctuation, ToLowerCase, RemoveMultipleSpaces, Strip
 import logging
+import time
+from datetime import datetime
 
 import re
 
@@ -112,6 +114,48 @@ def split_sentences(text: str) -> List[str]:
     return [s.strip() for s in segments if s.strip()]
 
 
+def word_count(text: str) -> int:
+    """Return the number of word tokens in ``text``."""
+    return len(re.findall(r"\w+", text))
+
+
+def log_experiment_results(
+    *,
+    args: argparse.Namespace,
+    wer_value: float,
+    student_time: float,
+    teacher_time: float,
+    total_time: float,
+    student_words: int,
+    teacher_words: int,
+    git_hash: str,
+    python_version: str,
+) -> None:
+    """Append a markdown table row with experiment metadata."""
+    log_path = Path("experiment_log.md")
+    if not log_path.exists():
+        header = (
+            "# Experiment Log\n\n"
+            "| Timestamp | Student | Teacher | Duration (s) | Device | Git | Python | "
+            "Student Words | Teacher Words | Student Time (s) | Teacher Time (s) | "
+            "Total Time (s) | WER (%) |\n"
+            "|-----------|---------|---------|--------------|--------|-----|--------|" \
+            "--------------|--------------|------------------|------------------|" \
+            "--------------|---------|\n"
+        )
+        log_path.write_text(header, encoding="utf-8")
+
+    timestamp = datetime.utcnow().isoformat(timespec="seconds")
+    row = (
+        f"| {timestamp} | {args.student.name} | {args.teacher.name} | "
+        f"{args.duration} | {args.device} | {git_hash} | {python_version} | "
+        f"{student_words} | {teacher_words} | {student_time:.2f} | {teacher_time:.2f} | "
+        f"{total_time:.2f} | {wer_value * 100:.2f} |\n"
+    )
+    with log_path.open("a", encoding="utf-8") as fh:
+        fh.write(row)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Transcribe two speaker tracks with SeamlessM4T and evaluate WER.")
     parser.add_argument("--student", type=Path, required=True, help="Path to Student Audio .m4a file")
@@ -122,6 +166,8 @@ def main() -> None:
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(message)s")
+
+    run_start = time.perf_counter()
 
     # Verify ffmpeg exists
     if subprocess.call(["which", "ffmpeg"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) != 0:
@@ -136,12 +182,18 @@ def main() -> None:
 
         # Transcribe
         logging.info("Transcribing Student track …")
+        t0 = time.perf_counter()
         student_text = transcribe_with_seamless(student_wav, device=args.device)
+        student_time = time.perf_counter() - t0
         logging.info("Student transcript:\n%s\n", student_text)
+        logging.info("Student transcription time: %.2fs", student_time)
 
         logging.info("Transcribing Teacher track …")
+        t0 = time.perf_counter()
         teacher_text = transcribe_with_seamless(teacher_wav, device=args.device)
+        teacher_time = time.perf_counter() - t0
         logging.info("Teacher transcript:\n%s\n", teacher_text)
+        logging.info("Teacher transcription time: %.2fs", teacher_time)
 
     # Save transcripts
     Path("student_transcript.txt").write_text(student_text, encoding="utf-8")
@@ -172,6 +224,40 @@ def main() -> None:
         "Word Error Rate (WER) vs reference (first %s s): %.2f%%",
         args.duration,
         error_rate * 100,
+    )
+
+    total_time = time.perf_counter() - run_start
+    student_words = word_count(student_text)
+    teacher_words = word_count(teacher_text)
+    git_hash = (
+        subprocess.check_output(["git", "rev-parse", "--short", "HEAD"])
+        .decode()
+        .strip()
+    )
+    python_version = sys.version.split()[0]
+
+    logging.info(
+        "Run summary: duration=%ss device=%s student_time=%.2fs teacher_time=%.2fs total_time=%.2fs WER=%.2f%% student_words=%s teacher_words=%s",
+        args.duration,
+        args.device,
+        student_time,
+        teacher_time,
+        total_time,
+        error_rate * 100,
+        student_words,
+        teacher_words,
+    )
+
+    log_experiment_results(
+        args=args,
+        wer_value=error_rate,
+        student_time=student_time,
+        teacher_time=teacher_time,
+        total_time=total_time,
+        student_words=student_words,
+        teacher_words=teacher_words,
+        git_hash=git_hash,
+        python_version=python_version,
     )
 
     # Evaluate Spanish line detection
